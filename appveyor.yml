@@ -1,0 +1,51 @@
+version: "{build}"
+
+os: Windows Server 2012 R2
+
+environment:
+  GOPATH: c:\gopath
+  matrix:
+    - MSI_ARCH: amd64
+      GOARCH: amd64
+    - MSI_ARCH: 386
+      GOARCH: 386
+
+clone_folder: c:\gopath\src\github.com\martinlindhe\wmi_exporter
+
+install:
+  - go version
+  - set PATH=%GOPATH%\bin;c:\go\bin;%GOPATH%\bin\windows_%GOARCH%;%PATH%
+  - go get -u github.com/prometheus/promu
+  - choco install gitversion.portable -y
+
+build_script:
+  - ps: gitversion /output json /showvariable FullSemVer | Set-Content VERSION -PassThru
+  - go test -v ./...
+  - promu build -v
+  - ps: |
+      $ErrorActionPreference = "Stop"
+      if($env:APPVEYOR_REPO_TAG -eq "True") {
+        # The MSI version is not semver compliant, so just take the numerical parts
+        $Version = $env:APPVEYOR_REPO_TAG_NAME -replace '^v?([0-9\.]+).*$','$1'
+        Write-Verbose "Setting msi version to $Version"
+        .\installer\build.ps1 -PathToExecutable .\wmi_exporter.exe -Version $Version -Arch "$env:MSI_ARCH"
+        Push-AppveyorArtifact installer\Output\wmi_exporter-$Version-$env:MSI_ARCH.msi -DeploymentName Installer
+      }
+
+after_build:
+  - 7z a wmi_exporter-%MSI_ARCH%.zip wmi_exporter.exe
+
+artifacts:
+  - name: Executable
+    path: 'wmi_exporter-*.zip'
+
+deploy:
+  - provider: GitHub
+    description: WMI Exporter version $(appveyor_build_version)
+    artifact: Executable,Installer
+    auth_token:
+      secure: 'CrXWeTf7qONUOEki5olFfGEUPMLDeHj61koDXV3OVEaLgtACmnVHsKUub9POflda'
+    draft: false
+    prerelease: false
+    on:
+      appveyor_repo_tag: true
